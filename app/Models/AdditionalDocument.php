@@ -29,4 +29,33 @@ class AdditionalDocument extends Model
     {
         return $this->belongsToMany(Lpd::class, 'additional_document_lpd');
     }
+
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(Department::class, 'cur_loc', 'location_code');
+    }
+
+    public function getDepartmentNameAttribute(): ?string
+    {
+        return $this->department?->name;
+    }
+
+    public function getDepartmentProjectAttribute(): ?string
+    {
+        return $this->department?->project;
+    }
+
+    public function getDepartmentLocationCodeAttribute(): ?string
+    {
+        return $this->department?->location_code;
+    }
+
+    public function getDepartmentFullInfoAttribute(): ?string
+    {
+        if (!$this->department) {
+            return null;
+        }
+        return "{$this->department->name} ({$this->department->location_code})" . 
+               ($this->department->project ? " - {$this->department->project}" : '');
+    }
 }

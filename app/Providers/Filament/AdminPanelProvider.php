@@ -19,6 +19,7 @@ use Illuminate\Session\Middleware\StartSession;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
 use Filament\Navigation\NavigationGroup;
+use Filament\Navigation\NavigationBuilder;
 
 class AdminPanelProvider extends PanelProvider
 {
@@ -59,6 +60,7 @@ class AdminPanelProvider extends PanelProvider
                 'Master',
                 'Settings',
             ])
+            ->sidebarCollapsibleOnDesktop()
             ->plugins([
                 FilamentShieldPlugin::make(),
             ])

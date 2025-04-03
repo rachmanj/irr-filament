@@ -8,6 +8,7 @@ use App\Models\AdditionalDocument;
 use App\Models\AdditionalDocumentType;
 use App\Models\Invoice;
 use App\Models\User;
+use App\Models\Department;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
@@ -28,21 +29,39 @@ class AdditionalDocumentResource extends Resource
 
     protected static ?string $navigationLabel = 'Additional Documents';
 
+    protected static bool $shouldRegisterNavigation = true;
+
+    protected static bool $shouldShowNavigation = true;
+
+    protected static bool $shouldShowNavigationCloseButton = true;
+
     public static function form(Form $form): Form
     {
         return $form
             ->schema([
-                Forms\Components\Section::make('Basic Information')
+                Forms\Components\Section::make('Document Information')
                     ->schema([
                         Forms\Components\Select::make('type_id')
-                            ->relationship('type', 'type_name')
-                            ->required()
+                            ->label('Document Type')
+                            ->options(
+                                AdditionalDocumentType::query()
+                                    ->orderBy('type_name')
+                                    ->get()
+                                    ->mapWithKeys(function ($type) {
+                                        return [$type->id => $type->type_name];
+                                    })
+                                    ->toArray()
+                            )
+                            ->searchable()
                             ->preload()
                             ->createOptionForm([
                                 Forms\Components\TextInput::make('type_name')
                                     ->required()
-                                    ->maxLength(255),
-                            ]),
+                                    ->maxLength(255)
+                                    ->unique(ignoreRecord: true)
+                                    ->validationAttribute('Document Type Name'),
+                            ])
+                            ->required(),
                         Forms\Components\TextInput::make('document_number')
                             ->required()
                             ->maxLength(255),
@@ -54,51 +73,67 @@ class AdditionalDocumentResource extends Resource
                             ->relationship('invoice', 'invoice_number')
                             ->searchable()
                             ->preload(),
-                        Forms\Components\TextInput::make('project')
-                            ->maxLength(50),
                         Forms\Components\DatePicker::make('receive_date'),
-                        Forms\Components\Select::make('created_by')
-                            ->relationship('createdBy', 'name')
-                            ->required()
-                            ->default(auth()->id())
+                        Forms\Components\Select::make('cur_loc')
+                            ->label('Current Location')
+                            ->options(
+                                Department::query()
+                                    ->whereNotNull('location_code')
+                                    ->orderBy('name')
+                                    ->get()
+                                    ->mapWithKeys(function ($department) {
+                                        $label = $department->name;
+                                        if ($department->project) {
+                                            $label .= " ({$department->project})";
+                                        }
+                                        $label .= " - {$department->location_code}";
+                                        return [$department->location_code => $label];
+                                    })
+                                    ->toArray()
+                            )
+                            ->searchable()
                             ->preload()
-                            ->searchable(),
+                            ->createOptionForm([
+                                Forms\Components\TextInput::make('name')
+                                    ->required()
+                                    ->maxLength(100)
+                                    ->unique(ignoreRecord: true)
+                                    ->validationAttribute('Department Name'),
+                                Forms\Components\TextInput::make('project')
+                                    ->maxLength(10)
+                                    ->validationAttribute('Project Code'),
+                                Forms\Components\TextInput::make('location_code')
+                                    ->required()
+                                    ->maxLength(30)
+                                    ->unique(ignoreRecord: true)
+                                    ->validationAttribute('Location Code'),
+                                Forms\Components\TextInput::make('transit_code')
+                                    ->maxLength(30)
+                                    ->validationAttribute('Transit Code'),
+                                Forms\Components\TextInput::make('akronim')
+                                    ->maxLength(10)
+                                    ->validationAttribute('Akronim'),
+                                Forms\Components\TextInput::make('sap_code')
+                                    ->maxLength(10)
+                                    ->validationAttribute('SAP Code'),
+                            ])
+                            ->required(),
+                        Forms\Components\Textarea::make('remarks')
+                            ->maxLength(255),
                         Forms\Components\FileUpload::make('attachment')
                             ->disk('public')
                             ->directory('documents')
                             ->maxSize(5120)
                             ->acceptedFileTypes(['application/pdf', 'image/*']),
-                    ])->columns(2),
-                
-                Forms\Components\Section::make('Additional Information')
-                    ->schema([
-                        Forms\Components\Textarea::make('remarks')
-                            ->maxLength(255),
-                        Forms\Components\TextInput::make('flag')
-                            ->maxLength(30),
-                        Forms\Components\Select::make('status')
-                            ->options([
-                                'open' => 'Open',
-                                'verified' => 'Verified',
-                                'returned' => 'Returned',
-                                'closed' => 'Closed',
-                                'cancelled' => 'Cancelled',
-                            ])
-                            ->required()
-                            ->default('open'),
-                        Forms\Components\TextInput::make('cur_loc')
-                            ->label('Current Location')
-                            ->maxLength(30),
-                        Forms\Components\TextInput::make('ito_creator')
-                            ->maxLength(50),
-                        Forms\Components\TextInput::make('grpo_no')
-                            ->maxLength(20),
-                        Forms\Components\TextInput::make('origin_wh')
-                            ->maxLength(20),
-                        Forms\Components\TextInput::make('destination_wh')
-                            ->maxLength(20),
-                        Forms\Components\TextInput::make('batch_no')
-                            ->numeric(),
+                        Forms\Components\Select::make('created_by')
+                            ->label('Created By')
+                            ->relationship('createdBy', 'name')
+                            ->disabled()
+                            ->dehydrated(false)
+                            ->visible(fn ($record) => $record !== null),
+                        Forms\Components\Hidden::make('created_by')
+                            ->default(fn () => auth()->id())
+                            ->required(),
                     ])->columns(2),
             ]);
     }
@@ -106,6 +141,7 @@ class AdditionalDocumentResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
+            ->recordUrl(null)
             ->columns([
                 Tables\Columns\TextColumn::make('type.type_name')
                     ->label('Document Type')
@@ -115,6 +151,14 @@ class AdditionalDocumentResource extends Resource
                     ->label('Document Number')
                     ->sortable()
                     ->searchable(),
+                Tables\Columns\TextColumn::make('document_date')
+                    ->label('Document Date')
+                    ->date()
+                    ->sortable(),
+                Tables\Columns\TextColumn::make('receive_date')
+                    ->label('Receive Date')
+                    ->date()
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('po_no')
                     ->label('PO No')
                     ->searchable(),
@@ -122,13 +166,18 @@ class AdditionalDocumentResource extends Resource
                     ->label('Inv No')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('cur_loc')
-                    ->label('Current Location')
+                    ->label('Location Code')
                     ->searchable(),
             ])
             ->filters([
                 Tables\Filters\SelectFilter::make('type_id')
                     ->label('Document Type')
                     ->relationship('type', 'type_name')
+                    ->preload()
+                    ->multiple(),
+                Tables\Filters\SelectFilter::make('department')
+                    ->label('Department')
+                    ->relationship('department', 'name')
                     ->preload()
                     ->multiple(),
                 Tables\Filters\SelectFilter::make('status')
@@ -141,13 +190,31 @@ class AdditionalDocumentResource extends Resource
                     ]),
             ])
             ->actions([
-                Tables\Actions\EditAction::make(),
+                Tables\Actions\EditAction::make()
+                    ->icon('heroicon-o-pencil-square')
+                    ->color('primary')
+                    ->tooltip('Edit document'),
+                Tables\Actions\DeleteAction::make()
+                    ->icon('heroicon-o-trash')
+                    ->color('danger')
+                    ->tooltip('Delete document')
+                    ->visible(fn () => auth()->user()->can('delete_additional::document')),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\DeleteBulkAction::make(),
+                    Tables\Actions\DeleteBulkAction::make()
+                        ->icon('heroicon-o-trash')
+                        ->color('danger')
+                        ->tooltip('Delete selected documents')
+                        ->visible(fn () => auth()->user()->can('delete_any_additional::document')),
                 ]),
-            ]);
+            ])
+            ->defaultSort('created_at', 'desc')
+            ->persistFiltersInSession()
+            ->persistSortInSession()
+            ->persistSearchInSession()
+            ->striped()
+            ->paginated([10, 25, 50, 100]);
     }
 
     public static function getRelations(): array
