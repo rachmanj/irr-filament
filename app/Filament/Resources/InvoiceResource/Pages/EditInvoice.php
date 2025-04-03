@@ -16,4 +16,4 @@ class EditInvoice extends EditRecord
             Actions\DeleteAction::make(),
         ];
     }
-}
+} 

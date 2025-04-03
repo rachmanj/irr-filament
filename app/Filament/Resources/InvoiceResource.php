@@ -37,7 +37,14 @@ class InvoiceResource extends Resource
                     ->schema([
                         Forms\Components\TextInput::make('invoice_number')
                             ->required()
-                            ->maxLength(255),
+                            ->maxLength(255)
+                            ->unique(ignoreRecord: true, modifyRuleUsing: function ($rule, $get) {
+                                return $rule->where('supplier_id', $get('supplier_id'));
+                            })
+                            ->validationAttribute('Invoice Number')
+                            ->validationMessages([
+                                'unique' => 'This invoice number already exists for the selected supplier.',
+                            ]),
                         Forms\Components\DatePicker::make('invoice_date')
                             ->required(),
                         Forms\Components\DatePicker::make('receive_date')
@@ -47,18 +54,68 @@ class InvoiceResource extends Resource
                             ->relationship('supplier', 'name')
                             ->required()
                             ->preload()
-                            ->searchable(),
+                            ->searchable()
+                            ->extraAttributes(['class' => 'fi-select-input']),
                         Forms\Components\TextInput::make('po_no')
-                            ->maxLength(30),
-                        Forms\Components\TextInput::make('receive_project')
                             ->maxLength(30)
-                            ->label('Receive Project (where invoice received)'),
-                        Forms\Components\TextInput::make('invoice_project')
-                            ->maxLength(30)
-                            ->label('Invoice Project (cost charged to)'),
-                        Forms\Components\TextInput::make('payment_project')
-                            ->maxLength(30)
-                            ->label('Payment Project (responsible for payment)'),
+                            ->live(onBlur: true)
+                            ->afterStateUpdated(function ($state, Forms\Set $set, $livewire) {
+                                if (empty($state)) {
+                                    session()->forget('similar_po_number');
+                                    return;
+                                }
+                                
+                                // Search for additional documents with similar PO number
+                                $additionalDocuments = \App\Models\AdditionalDocument::whereNull('invoice_id')
+                                    ->where('po_no', 'like', "%{$state}%")
+                                    ->count();
+                                
+                                if ($additionalDocuments == 0) {
+                                    session()->forget('similar_po_number');
+                                    return;
+                                }
+                                
+                                // Store PO number for filtering the relation manager
+                                session(['similar_po_number' => $state]);
+                                
+                                // Show notification about found documents
+                                \Filament\Notifications\Notification::make()
+                                    ->title('Additional Documents Found')
+                                    ->body("Found {$additionalDocuments} unassociated additional document(s) with similar PO number. Check the Additional Documents tab to associate them.")
+                                    ->icon('heroicon-o-document-text')
+                                    ->iconColor('success')
+                                    ->duration(10000) // 10 seconds
+                                    ->persistent()
+                                    ->actions([
+                                        \Filament\Notifications\Actions\Action::make('view')
+                                            ->label('Go to Additional Documents Tab')
+                                            ->close()
+                                            ->action(function () use ($livewire) {
+                                                $script = <<<JS
+                                                    document.querySelector('button[role="tab"][aria-controls*="additional-documents"]').click();
+                                                JS;
+                                                
+                                                $livewire->dispatch('eval', ['js' => $script]);
+                                            }),
+                                    ])
+                                    ->info()
+                                    ->send();
+                            }),
+                        Forms\Components\Select::make('receive_project')
+                            ->label('Receive Project (where invoice received)')
+                            ->options(Project::orderBy('code')->pluck('code', 'code'))
+                            ->searchable()
+                            ->extraAttributes(['class' => 'fi-select-input']),
+                        Forms\Components\Select::make('invoice_project')
+                            ->label('Invoice Project (cost charged to)')
+                            ->options(Project::orderBy('code')->pluck('code', 'code'))
+                            ->searchable()
+                            ->extraAttributes(['class' => 'fi-select-input']),
+                        Forms\Components\Select::make('payment_project')
+                            ->label('Payment Project (responsible for payment)')
+                            ->options(Project::orderBy('code')->pluck('code', 'code'))
+                            ->searchable()
+                            ->extraAttributes(['class' => 'fi-select-input']),
                         Forms\Components\Select::make('currency')
                             ->options([
                                 'IDR' => 'IDR - Indonesian Rupiah',
@@ -67,7 +124,9 @@ class InvoiceResource extends Resource
                                 'SGD' => 'SGD - Singapore Dollar',
                             ])
                             ->default('IDR')
-                            ->required(),
+                            ->required()
+                            ->searchable()
+                            ->extraAttributes(['class' => 'fi-select-input']),
                         Forms\Components\TextInput::make('amount')
                             ->required()
                             ->numeric()
@@ -75,7 +134,9 @@ class InvoiceResource extends Resource
                         Forms\Components\Select::make('type_id')
                             ->relationship('invoiceType', 'type_name')
                             ->required()
-                            ->preload(),
+                            ->preload()
+                            ->searchable()
+                            ->extraAttributes(['class' => 'fi-select-input']),
                         Forms\Components\DatePicker::make('payment_date'),
                     ])->columns(2),
                 
@@ -95,24 +156,22 @@ class InvoiceResource extends Resource
                                 'cancel' => 'Cancelled',
                             ])
                             ->default('open')
-                            ->required(),
-                        Forms\Components\Select::make('created_by')
-                            ->relationship('createdBy', 'name')
                             ->required()
-                            ->default(auth()->id())
-                            ->preload()
-                            ->searchable(),
-                        Forms\Components\TextInput::make('duration1')
-                            ->numeric()
-                            ->label('Accounting Process Duration (days)'),
-                        Forms\Components\TextInput::make('duration2')
-                            ->numeric()
-                            ->label('Finance Process Duration (days)'),
+                            ->visible(fn ($record) => $record !== null)
+                            ->extraAttributes(['class' => 'fi-select-input']),
+                        Forms\Components\Select::make('created_by_display')
+                            ->label('Created By')
+                            ->relationship('createdBy', 'name')
+                            ->disabled()
+                            ->dehydrated(false)
+                            ->visible(fn ($record) => $record !== null)
+                            ->extraAttributes(['class' => 'fi-select-input']),
+                        Forms\Components\Hidden::make('created_by')
+                            ->default(fn () => auth()->id())
+                            ->required(),
                         Forms\Components\TextInput::make('sap_doc')
                             ->maxLength(20)
                             ->label('SAP Document Number'),
-                        Forms\Components\TextInput::make('flag')
-                            ->maxLength(30),
                     ])->columns(2),
             ]);
     }

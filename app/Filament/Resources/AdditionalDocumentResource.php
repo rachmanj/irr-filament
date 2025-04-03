@@ -199,6 +199,39 @@ class AdditionalDocumentResource extends Resource
                     ->color('danger')
                     ->tooltip('Delete document')
                     ->visible(fn () => auth()->user()->can('delete_additional::document')),
+                Tables\Actions\Action::make('associate')
+                    ->label('Associate with Invoice')
+                    ->icon('heroicon-o-link')
+                    ->color('success')
+                    ->visible(fn () => request()->has('invoice_association'))
+                    ->action(function (AdditionalDocument $record) {
+                        $invoiceId = request()->get('invoice_association');
+                        
+                        if ($invoiceId === 'new') {
+                            // Store in session for later use in CreateInvoice
+                            $sessionData = session('pending_document_associations', []);
+                            if (!in_array($record->id, $sessionData)) {
+                                $sessionData[] = $record->id;
+                                session(['pending_document_associations' => $sessionData]);
+                            }
+                            
+                            \Filament\Notifications\Notification::make()
+                                ->title('Document Marked for Association')
+                                ->body('This document will be associated with the invoice once it is created.')
+                                ->success()
+                                ->send();
+                        } else {
+                            // Associate with existing invoice
+                            $record->invoice_id = $invoiceId;
+                            $record->save();
+                            
+                            \Filament\Notifications\Notification::make()
+                                ->title('Document Associated')
+                                ->body('This document has been associated with the invoice.')
+                                ->success()
+                                ->send();
+                        }
+                    }),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
