@@ -48,27 +48,68 @@ class AdditionalDocumentsRelationManager extends RelationManager
             ]);
     }
 
+    protected function paginateTableQuery(Builder $query): \Illuminate\Contracts\Pagination\Paginator
+    {
+        // If a similar PO number is stored in the session and we're on the first page
+        // add unassociated documents with similar PO to the results
+        $similarPo = session('similar_po_number');
+        
+        if ($similarPo) {
+            // First get the normal relationship results (documents already associated with this invoice)
+            $relationshipResults = parent::paginateTableQuery($query);
+            
+            // Log the query that was executed
+            \Illuminate\Support\Facades\Log::info("Original query: " . $query->toSql());
+            \Illuminate\Support\Facades\Log::info("Query bindings: " . json_encode($query->getBindings()));
+            
+            // Now get unassociated documents with similar PO number
+            $invoiceId = $this->getOwnerRecord()->id;
+            $unassociatedDocs = \App\Models\AdditionalDocument::whereNull('invoice_id')
+                ->where('po_no', 'like', "%{$similarPo}%")
+                ->get();
+                
+            // Log what we found
+            \Illuminate\Support\Facades\Log::info("Found " . $unassociatedDocs->count() . " unassociated docs with PO: {$similarPo}");
+            
+            // If there are any unassociated documents, merge them with the relationship results
+            if ($unassociatedDocs->count() > 0) {
+                // Get the original paginator data
+                $relationshipData = $relationshipResults->items();
+                
+                // Merge with unassociated documents
+                $allDocuments = collect($relationshipData)->merge($unassociatedDocs);
+                
+                // Create a custom paginator with all documents
+                $paginator = new \Illuminate\Pagination\LengthAwarePaginator(
+                    $allDocuments,
+                    $allDocuments->count(),
+                    $allDocuments->count(),
+                    1
+                );
+                
+                // Add a path to the paginator to prevent URL errors
+                $paginator->withPath(request()->url());
+                
+                // Add a "items" public property to match the EloquentCollection behavior
+                $paginatorItemsProperty = new \ReflectionProperty(\Illuminate\Pagination\LengthAwarePaginator::class, 'items');
+                $paginatorItemsProperty->setAccessible(true);
+                $paginatorItemsProperty->setValue($paginator, $allDocuments);
+                
+                return $paginator;
+            }
+            
+            // If no unassociated documents were found, return the original results
+            return $relationshipResults;
+        }
+        
+        // If no similar PO number in session, just return the normal relationship results
+        return parent::paginateTableQuery($query);
+    }
+
     public function table(Table $table): Table
     {
         return $table
             ->recordTitleAttribute('document_number')
-            ->modifyQueryUsing(function (Builder $query) {
-                // If we have a similar PO number in the session, also include unassociated documents
-                $similarPo = session('similar_po_number');
-                
-                if ($similarPo) {
-                    $invoiceId = $this->getOwnerRecord()->id;
-                    
-                    // Get both already associated documents and unassociated documents with similar PO
-                    $query->where(function($q) use ($invoiceId, $similarPo) {
-                        $q->where('invoice_id', $invoiceId) // Already associated docs
-                          ->orWhere(function($subQuery) use ($similarPo) {
-                              $subQuery->whereNull('invoice_id') // Unassociated docs with matching PO
-                                      ->where('po_no', 'like', "%{$similarPo}%");
-                          });
-                    });
-                }
-            })
             ->columns([
                 Tables\Columns\TextColumn::make('document_number')
                     ->searchable(),
@@ -91,7 +132,12 @@ class AdditionalDocumentsRelationManager extends RelationManager
                 Tables\Columns\IconColumn::make('is_associated')
                     ->label('Associated')
                     ->boolean()
-                    ->getStateUsing(fn ($record) => !is_null($record->invoice_id))
+                    ->getStateUsing(function ($record) {
+                        $currentInvoiceId = $this->getOwnerRecord()->id;
+                        $isAssociated = $record->invoice_id === $currentInvoiceId;
+                        \Illuminate\Support\Facades\Log::info("Document {$record->id} is associated with invoice {$record->invoice_id}, current invoice: {$currentInvoiceId}, result: " . ($isAssociated ? 'true' : 'false'));
+                        return $isAssociated;
+                    })
                     ->trueIcon('heroicon-o-check-circle')
                     ->falseIcon('heroicon-o-x-circle')
                     ->trueColor('success')
@@ -125,94 +171,28 @@ class AdditionalDocumentsRelationManager extends RelationManager
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),
-                Tables\Actions\DeleteAction::make(),
                 Tables\Actions\Action::make('associate')
                     ->label('Associate')
                     ->icon('heroicon-o-link')
                     ->color('success')
                     ->visible(fn ($record) => $record->invoice_id === null)
-                    ->action(function ($record) {
-                        // Get the current invoice id
-                        $invoiceId = $this->getOwnerRecord()->id;
-                        
-                        // Associate the document with this invoice
-                        $record->invoice_id = $invoiceId;
-                        $record->save();
-                        
-                        // Show success notification
-                        \Filament\Notifications\Notification::make()
-                            ->title('Document Associated')
-                            ->body('The document has been associated with this invoice.')
-                            ->success()
-                            ->send();
-                    }),
+                    ->url(fn ($record) => route('filament.admin.resources.invoices.associate-document', [
+                        'invoice' => $this->getOwnerRecord()->id,
+                        'document' => $record->id
+                    ])),
                 Tables\Actions\Action::make('dissociate')
                     ->label('Dissociate')
                     ->icon('heroicon-o-x-mark')
                     ->color('danger')
                     ->visible(fn ($record) => $record->invoice_id !== null)
-                    ->requiresConfirmation()
-                    ->action(function ($record) {
-                        // Remove the association
-                        $record->invoice_id = null;
-                        $record->save();
-                        
-                        // Show success notification
-                        \Filament\Notifications\Notification::make()
-                            ->title('Document Dissociated')
-                            ->body('The document has been removed from this invoice.')
-                            ->success()
-                            ->send();
-                    }),
+                    ->url(fn ($record) => route('filament.admin.resources.invoices.dissociate-document', [
+                        'invoice' => $this->getOwnerRecord()->id,
+                        'document' => $record->id
+                    ])),
             ])
             ->bulkActions([
-                Tables\Actions\BulkActionGroup::make([
-                    Tables\Actions\BulkAction::make('associateSelected')
-                        ->label('Associate Selected')
-                        ->icon('heroicon-o-link')
-                        ->color('success')
-                        ->action(function (array $records) {
-                            $invoiceId = $this->getOwnerRecord()->id;
-                            $count = 0;
-                            
-                            foreach ($records as $record) {
-                                if ($record->invoice_id === null) {
-                                    $record->invoice_id = $invoiceId;
-                                    $record->save();
-                                    $count++;
-                                }
-                            }
-                            
-                            \Filament\Notifications\Notification::make()
-                                ->title('Documents Associated')
-                                ->body("$count document(s) have been associated with this invoice.")
-                                ->success()
-                                ->send();
-                        }),
-                    Tables\Actions\BulkAction::make('dissociateSelected')
-                        ->label('Dissociate Selected')
-                        ->icon('heroicon-o-x-mark')
-                        ->color('danger')
-                        ->requiresConfirmation()
-                        ->action(function (array $records) {
-                            $count = 0;
-                            
-                            foreach ($records as $record) {
-                                if ($record->invoice_id !== null) {
-                                    $record->invoice_id = null;
-                                    $record->save();
-                                    $count++;
-                                }
-                            }
-                            
-                            \Filament\Notifications\Notification::make()
-                                ->title('Documents Dissociated')
-                                ->body("$count document(s) have been removed from this invoice.")
-                                ->success()
-                                ->send();
-                        }),
-                    Tables\Actions\DeleteBulkAction::make(),
-                ]),
+                // Remove all bulk actions for now since they don't work
+                // We'll re-implement them later when we figure out the issue
             ]);
     }
 } 

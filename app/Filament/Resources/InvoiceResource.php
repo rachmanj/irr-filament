@@ -65,41 +65,49 @@ class InvoiceResource extends Resource
                                     return;
                                 }
                                 
+                                // First store the PO number in session
+                                session(['similar_po_number' => $state]);
+                                
                                 // Search for additional documents with similar PO number
                                 $additionalDocuments = \App\Models\AdditionalDocument::whereNull('invoice_id')
                                     ->where('po_no', 'like', "%{$state}%")
-                                    ->count();
+                                    ->get();
                                 
-                                if ($additionalDocuments == 0) {
-                                    session()->forget('similar_po_number');
-                                    return;
+                                $count = $additionalDocuments->count();
+                                
+                                // Log for debugging
+                                \Illuminate\Support\Facades\Log::info("Found $count unassociated documents with PO similar to: $state");
+                                
+                                if ($count > 0) {
+                                    // Show notification about found documents
+                                    \Filament\Notifications\Notification::make()
+                                        ->title('Additional Documents Found')
+                                        ->body("Found {$count} unassociated additional document(s) with similar PO number. Check the Additional Documents tab to associate them.")
+                                        ->icon('heroicon-o-document-text')
+                                        ->iconColor('success')
+                                        ->duration(10000) // 10 seconds
+                                        ->persistent()
+                                        ->actions([
+                                            \Filament\Notifications\Actions\Action::make('view')
+                                                ->label('Go to Additional Documents Tab')
+                                                ->close()
+                                                ->action(function () use ($livewire) {
+                                                    $script = <<<JS
+                                                        setTimeout(function() {
+                                                            // Try to click the tab
+                                                            var tab = document.querySelector('button[role="tab"][aria-controls*="additional-documents"]');
+                                                            if (tab) {
+                                                                tab.click();
+                                                            }
+                                                        }, 500);
+                                                    JS;
+                                                    
+                                                    $livewire->dispatch('eval', ['js' => $script]);
+                                                }),
+                                        ])
+                                        ->warning()
+                                        ->send();
                                 }
-                                
-                                // Store PO number for filtering the relation manager
-                                session(['similar_po_number' => $state]);
-                                
-                                // Show notification about found documents
-                                \Filament\Notifications\Notification::make()
-                                    ->title('Additional Documents Found')
-                                    ->body("Found {$additionalDocuments} unassociated additional document(s) with similar PO number. Check the Additional Documents tab to associate them.")
-                                    ->icon('heroicon-o-document-text')
-                                    ->iconColor('success')
-                                    ->duration(10000) // 10 seconds
-                                    ->persistent()
-                                    ->actions([
-                                        \Filament\Notifications\Actions\Action::make('view')
-                                            ->label('Go to Additional Documents Tab')
-                                            ->close()
-                                            ->action(function () use ($livewire) {
-                                                $script = <<<JS
-                                                    document.querySelector('button[role="tab"][aria-controls*="additional-documents"]').click();
-                                                JS;
-                                                
-                                                $livewire->dispatch('eval', ['js' => $script]);
-                                            }),
-                                    ])
-                                    ->info()
-                                    ->send();
                             }),
                         Forms\Components\Select::make('receive_project')
                             ->label('Receive Project (where invoice received)')

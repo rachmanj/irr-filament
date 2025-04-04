@@ -61,12 +61,14 @@
                         <td class="px-6 py-4 whitespace-nowrap">
                             <span
                                 class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
-                                @if ($document->status === 'open') bg-gray-100 text-gray-800
-                                @elseif($document->status === 'verified') bg-green-100 text-green-800
-                                @elseif($document->status === 'returned') bg-red-100 text-red-800
-                                @elseif($document->status === 'closed') bg-blue-100 text-blue-800
-                                @elseif($document->status === 'cancelled') bg-yellow-100 text-yellow-800
-                                @else bg-gray-100 text-gray-800 @endif">
+                                {{ match ($document->status) {
+                                    'open' => 'bg-gray-100 text-gray-800',
+                                    'verified' => 'bg-green-100 text-green-800',
+                                    'returned' => 'bg-red-100 text-red-800',
+                                    'closed' => 'bg-blue-100 text-blue-800',
+                                    'cancelled' => 'bg-yellow-100 text-yellow-800',
+                                    default => 'bg-gray-100 text-gray-800',
+                                } }}">
                                 {{ ucfirst($document->status) }}
                             </span>
                         </td>
