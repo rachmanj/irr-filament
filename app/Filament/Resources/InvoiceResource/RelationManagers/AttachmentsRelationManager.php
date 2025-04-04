@@ -25,6 +25,11 @@ class AttachmentsRelationManager extends RelationManager
                     ->maxSize(5120)
                     ->storeFileNamesIn('original_name')
                     ->acceptedFileTypes(['application/pdf', 'image/*', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']),
+                Forms\Components\Textarea::make('remarks')
+                    ->label('Remarks')
+                    ->placeholder('Add description of what this attachment contains')
+                    ->nullable()
+                    ->columnSpanFull(),
             ]);
     }
 
@@ -36,16 +41,14 @@ class AttachmentsRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('original_name')
                     ->label('File Name')
                     ->searchable(),
-                Tables\Columns\TextColumn::make('mime_type')
-                    ->label('File Type'),
-                Tables\Columns\TextColumn::make('size')
-                    ->label('Size (KB)')
-                    ->formatStateUsing(fn (int $state) => number_format($state / 1024, 2) . ' KB'),
+                Tables\Columns\TextColumn::make('remarks')
+                    ->label('Remarks')
+                    ->formatStateUsing(fn ($state, $record) => $state ?? $record->original_name)
+                    ->limit(80)
+                    ->wrap()
+                    ->searchable(),
                 Tables\Columns\TextColumn::make('uploader.name')
                     ->label('Uploaded By'),
-                Tables\Columns\TextColumn::make('created_at')
-                    ->label('Upload Date')
-                    ->dateTime(),
             ])
             ->filters([
                 //
@@ -62,6 +65,12 @@ class AttachmentsRelationManager extends RelationManager
             ])
             ->actions([
                 Tables\Actions\ViewAction::make(),
+                Tables\Actions\Action::make('preview')
+                    ->label('Preview')
+                    ->color('success')
+                    ->icon('heroicon-o-eye')
+                    ->url(fn ($record) => asset('storage/' . $record->file_path))
+                    ->openUrlInNewTab(),
                 Tables\Actions\DeleteAction::make(),
             ])
             ->bulkActions([

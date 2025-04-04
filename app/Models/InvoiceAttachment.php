@@ -15,7 +15,8 @@ class InvoiceAttachment extends Model
         'original_name',
         'mime_type',
         'size',
-        'uploaded_by'
+        'uploaded_by',
+        'remarks'
     ];
 
     protected $appends = ['file_url'];

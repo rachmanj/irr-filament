@@ -43,6 +43,11 @@ class InvoiceAttachmentResource extends Resource
                     ->visibility('public')
                     ->storeFileNamesIn('original_name')
                     ->acceptedFileTypes(['application/pdf', 'image/*', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']),
+                Forms\Components\Textarea::make('remarks')
+                    ->label('Remarks')
+                    ->placeholder('Add description of what this attachment contains')
+                    ->nullable()
+                    ->columnSpanFull(),
                 Forms\Components\Select::make('uploaded_by')
                     ->relationship('uploader', 'name')
                     ->required()
@@ -63,17 +68,14 @@ class InvoiceAttachmentResource extends Resource
                 Tables\Columns\TextColumn::make('original_name')
                     ->label('File Name')
                     ->searchable(),
-                Tables\Columns\TextColumn::make('mime_type')
-                    ->label('File Type'),
-                Tables\Columns\TextColumn::make('size')
-                    ->label('Size (KB)')
-                    ->formatStateUsing(fn (int $state) => number_format($state / 1024, 2) . ' KB'),
+                Tables\Columns\TextColumn::make('remarks')
+                    ->label('Remarks')
+                    ->formatStateUsing(fn ($state, $record) => $state ?? $record->original_name)
+                    ->limit(80)
+                    ->wrap()
+                    ->searchable(),
                 Tables\Columns\TextColumn::make('uploader.name')
                     ->label('Uploaded By')
-                    ->sortable(),
-                Tables\Columns\TextColumn::make('created_at')
-                    ->label('Upload Date')
-                    ->dateTime()
                     ->sortable(),
             ])
             ->filters([
